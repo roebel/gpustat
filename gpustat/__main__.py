@@ -5,8 +5,10 @@ from __future__ import print_function
 import sys
 
 from gpustat import __version__
-from .core import GPUStatCollection
-
+try:
+    from .core import GPUStatCollection
+except (ImportError, SystemError):
+    from core import GPUStatCollection
 
 def print_gpustat(json=False, debug=False, **args):
     '''
@@ -54,6 +56,8 @@ def main(*argv):
     parser.add_argument('-P', '--show-power', nargs='?', const='draw,limit',
                         choices=['', 'draw', 'limit', 'draw,limit', 'limit,draw'],
                         help='Show GPU power usage or draw (and/or limit)')
+    parser.add_argument('-a', '--all', action='store_true',
+                        help='Show all information')
     parser.add_argument('--no-header', dest='show_header', action='store_false', default=True,
                         help='Suppress header message')
     parser.add_argument('--gpuname-width', type=int, default=16,
@@ -65,6 +69,12 @@ def main(*argv):
     parser.add_argument('-v', '--version', action='version',
                         version=('gpustat %s' % __version__))
     args = parser.parse_args(argv[1:])
+
+    if args.all:
+        args.show_pid = True
+        args.show_user = True
+        args.show_cmd = True
+        args.show_power = True
 
     print_gpustat(**vars(args))
 

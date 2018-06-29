@@ -14,6 +14,11 @@ from __future__ import print_function
 import json
 import locale
 import os.path
+import os
+
+# force alignment between CUDA and nvml device ids
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
 import platform
 import sys
 from datetime import datetime
@@ -26,6 +31,28 @@ import pynvml as N
 from blessings import Terminal
 
 NOT_SUPPORTED = 'Not Supported'
+
+
+def get_lock_features(gpu_id):
+    if os.path.exists('/dev/shm'):
+        #/dev/shm on linux machines is a RAM disk, so is definitely cleared
+        _lock_file_dir = '/dev/shm/'
+    else:
+        _lock_file_dir = '/tmp'
+
+    _lock_file_dir_lock = os.path.join(_lock_file_dir, "locked")
+    _gpu_lock_pattern = os.path.join(_lock_file_dir, "gpu_lock_{0:d}")
+    try:
+        gpu_lock_link = _gpu_lock_pattern.format(gpu_id)
+        if os.path.islink(gpu_lock_link):
+            pp = os.path.realpath(gpu_lock_link)
+            ss = os.path.basename(pp).split("_")
+            if len(ss) == 3 and ss[0] == "GPULOCK":
+                return ss[1], ss[2]+"-lock"
+    except (OSError, Exception):
+        pass
+    
+    return "unknown" , "free"
 
 
 class GPUStat(object):
@@ -70,6 +97,13 @@ class GPUStat(object):
         Returns the name of GPU card (e.g. Geforce Titan X)
         """
         return self.entry['name']
+
+    @property
+    def lock(self):
+        """
+        Returns the lock type for  card (e.g. hard/soft/weak)
+        """
+        return self.entry['lock']
 
     @property
     def memory_total(self):
@@ -204,6 +238,17 @@ class GPUStat(object):
         reps = (reps) % colors
         reps = reps.format(entry={k: _repr(v) for (k, v) in self.entry.items()},
                            gpuname_width=gpuname_width)
+        if "hard" in self.entry['lock']:
+            lock_col = term.red
+        elif "soft" in self.entry['lock']:
+            lock_col = term.orange
+        elif "weak" in self.entry['lock']:
+            lock_col = term.yellow
+        else:
+            lock_col = term.green
+        
+            
+        reps += " | {0:s}{1:^9s}{2:s}".format(lock_col,self.entry['lock'], term.normal)
         reps += " |"
 
         def process_repr(p):
@@ -258,9 +303,15 @@ class GPUStatCollection(object):
                 """Get the process information of specific pid"""
                 process = {}
                 ps_process = psutil.Process(pid=nv_process.pid)
-                process['username'] = ps_process.username()
+                if isinstance(ps_process.username, str):
+                    process['username'] = ps_process.username
+                else:
+                    process['username'] = ps_process.username()
                 # cmdline returns full path; as in `ps -o comm`, get short cmdnames.
-                _cmdline = ps_process.cmdline()
+                if isinstance(ps_process.cmdline, list):
+                    _cmdline = ps_process.cmdline
+                else:
+                    _cmdline = ps_process.cmdline()
                 if not _cmdline:   # sometimes, zombie or unknown (e.g. [kworker/8:2H])
                     process['command'] = '?'
                 else:
@@ -342,6 +393,7 @@ class GPUStatCollection(object):
                 'memory.used': int(memory.used / 1024 / 1024) if memory else None,
                 'memory.total': int(memory.total / 1024 / 1024) if memory else None,
                 'processes': processes,
+                'lock': get_lock_features(index)[1]
             }
             return gpu_info
 
@@ -378,7 +430,7 @@ class GPUStatCollection(object):
     def print_formatted(self, fp=sys.stdout, force_color=False, no_color=False,
                         show_cmd=False, show_user=False, show_pid=False,
                         show_power=None, gpuname_width=16,
-                        show_header=True,
+                        show_header=True, all=None
                         ):
         # ANSI color configuration
         if force_color and no_color:
