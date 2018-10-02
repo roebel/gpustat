@@ -253,8 +253,6 @@ class GPUStat(object):
 
         def process_repr(p):
             r = ''
-            if not show_cmd or show_user:
-                r += "{CUser}{}{C0}".format(_repr(p['username'], '--'), **colors)
             if show_cmd:
                 if r: r += ':'
                 r += "{C1}{}{C0}".format(_repr(p.get('command', p['pid']), '--'), **colors)
@@ -264,12 +262,14 @@ class GPUStat(object):
             r += '({CMemP}{}M{C0})'.format(_repr(p['gpu_memory_usage'], '?'), **colors)
             return r
 
+        if show_user:
+            reps += " {CUser}{}{C0}".format(_repr(self.entry['user'], '--'), **colors)
+
         if self.entry['processes'] is not None:
-            for p in self.entry['processes']:
-                reps += ' ' + process_repr(p)
-        else:
-            # None (not available)
-            reps += ' (Not Supported)'
+            if self.entry['processes']:
+                reps += ':'
+                for p in self.entry['processes']:
+                    reps += process_repr(p)
 
         fp.write(reps)
         return fp
@@ -381,6 +381,7 @@ class GPUStatCollection(object):
                         pass
 
             index = N.nvmlDeviceGetIndex(handle)
+            username, locktype = get_lock_features(index)
             gpu_info = {
                 'index': index,
                 'uuid': uuid,
@@ -393,7 +394,8 @@ class GPUStatCollection(object):
                 'memory.used': int(memory.used / 1024 / 1024) if memory else None,
                 'memory.total': int(memory.total / 1024 / 1024) if memory else None,
                 'processes': processes,
-                'lock': get_lock_features(index)[1]
+                'user': username,
+                'lock': locktype
             }
             return gpu_info
 
