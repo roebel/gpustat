@@ -52,7 +52,7 @@ def get_lock_features(gpu_id):
     except (OSError, Exception):
         pass
     
-    return "unknown" , "free"
+    return "" , "free"
 
 
 class GPUStat(object):

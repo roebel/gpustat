@@ -75,7 +75,9 @@ def main(*argv):
         args.show_user = True
         args.show_cmd = True
         args.show_power = True
-
+    else:
+        args.show_user = True
+        
     print_gpustat(**vars(args))
 
 
