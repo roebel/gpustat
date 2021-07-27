@@ -34,9 +34,9 @@ NOT_SUPPORTED = 'Not Supported'
 
 
 def get_lock_features(gpu_id):
-    if os.path.exists('/dev/shm'):
+    if os.path.exists('/data/anasynth_nonbp/gpu_locks'):
         #/dev/shm on linux machines is a RAM disk, so is definitely cleared
-        _lock_file_dir = '/dev/shm/'
+        _lock_file_dir = '/data/anasynth_nonbp/gpu_locks'
     else:
         _lock_file_dir = '/tmp'
 

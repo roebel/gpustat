@@ -2,7 +2,7 @@
 The gpustat module.
 """
 
-__version__ = '0.6.1_patched_roebel'
+__version__ = '0.6.1post2+patched_for_manage_gpus'
 
 from .core import GPUStat, GPUStatCollection
 from .core import new_query
