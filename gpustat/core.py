@@ -273,7 +273,7 @@ class GPUStat(object):
             reps += " {CUser}{}{C0}".format(_repr(self.entry['user'], '--'), **colors)
 
         if "owner_pid" in self.entry and self.entry["owner_pid"] is not None:
-            reps += ":LO{CUser}{}{C0}".format(_repr(self.entry["owner_pid"], '--'), **colors)
+            reps += ":LO/{CUser}{}{C0}".format(_repr(self.entry["owner_pid"], '--'), **colors)
 
         if self.entry['processes'] is not None:
             if self.entry['processes']:
