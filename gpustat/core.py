@@ -42,17 +42,24 @@ def get_lock_features(gpu_id):
 
     _lock_file_dir_lock = os.path.join(_lock_file_dir, "locked")
     _gpu_lock_pattern = os.path.join(_lock_file_dir, "gpu_lock_{0:d}")
+    opid = None
     try:
         gpu_lock_link = _gpu_lock_pattern.format(gpu_id)
         if os.path.islink(gpu_lock_link):
             pp = os.path.realpath(gpu_lock_link)
             ss = os.path.basename(pp).split("_")
-            if len(ss) == 3 and ss[0] == "GPULOCK":
-                return ss[1], ss[2]+"-lock"
+            if len(ss) == 3 and ss[0].startswith("GPULOCK"):
+                try :
+                    res = ss[0].split(":")
+                    if len(res) == 2:
+                        opid = int(res[1])
+                except (ValueError, AttributeError):
+                    pass
+                return ss[1], opid,  ss[2]+"-lock"
     except (OSError, Exception):
         pass
     
-    return "" , "free"
+    return "" , opid, "free"
 
 
 class GPUStat(object):
@@ -265,9 +272,13 @@ class GPUStat(object):
         if show_user:
             reps += " {CUser}{}{C0}".format(_repr(self.entry['user'], '--'), **colors)
 
+        if "owner_pid" in self.entry and self.entry["owner_pid"] is not None:
+            reps += ":LO{CUser}{}{C0}".format(_repr(self.entry["owner_pid"], '--'), **colors)
+
         if self.entry['processes'] is not None:
             if self.entry['processes']:
                 reps += ':'
+                    
                 for p in self.entry['processes']:
                     reps += process_repr(p)
 
@@ -381,7 +392,7 @@ class GPUStatCollection(object):
                         pass
 
             index = N.nvmlDeviceGetIndex(handle)
-            username, locktype = get_lock_features(index)
+            username, opid, locktype = get_lock_features(index)
             gpu_info = {
                 'index': index,
                 'uuid': uuid,
@@ -394,6 +405,7 @@ class GPUStatCollection(object):
                 'memory.used': int(memory.used / 1024 / 1024) if memory else None,
                 'memory.total': int(memory.total / 1024 / 1024) if memory else None,
                 'processes': processes,
+                "owner_pid": opid,
                 'user': username,
                 'lock': locktype
             }
