@@ -55,10 +55,11 @@ def get_lock_features(gpu_id):
                         opid = int(res[1])
                 except (ValueError, AttributeError):
                     pass
-                return ss[1], opid,  ss[2]+"-lock"
+                lock_kind = ss[2].strip().lower()
+                return ss[1], opid, lock_kind + "-lock"
     except (OSError, Exception):
         pass
-    
+
     return "" , opid, "free"
 
 
@@ -108,7 +109,7 @@ class GPUStat(object):
     @property
     def lock(self):
         """
-        Returns the lock type for  card (e.g. hard/soft/weak)
+        Returns the lock type for card (e.g. hard/soft/weak/perm)
         """
         return self.entry['lock']
 
@@ -247,19 +248,23 @@ class GPUStat(object):
                            gpuname_width=gpuname_width)
         if "hard" in self.entry['lock']:
             lock_col = term.red
+        elif "perm" in self.entry['lock']:
+            lock_col = term.bold_magenta
         elif "soft" in self.entry['lock']:
             lock_col = term.orange
         elif "weak" in self.entry['lock']:
             lock_col = term.yellow
         else:
             lock_col = term.green
-        
-            
+
+
         reps += " | {0:s}{1:^9s}{2:s}".format(lock_col,self.entry['lock'], term.normal)
         reps += " |"
 
         def process_repr(p):
             r = ''
+            if p.get('username'):
+                r += "{CUser}{}{C0}".format(_repr(p['username'], '--'), **colors)
             if show_cmd:
                 if r: r += ':'
                 r += "{C1}{}{C0}".format(_repr(p.get('command', p['pid']), '--'), **colors)
@@ -269,7 +274,7 @@ class GPUStat(object):
             r += '({CMemP}{}M{C0})'.format(_repr(p['gpu_memory_usage'], '?'), **colors)
             return r
 
-        if show_user:
+        if show_user and self.entry.get('user'):
             reps += " {CUser}{}{C0}".format(_repr(self.entry['user'], '--'), **colors)
 
         if "owner_pid" in self.entry and self.entry["owner_pid"] is not None:
@@ -277,10 +282,14 @@ class GPUStat(object):
 
         if self.entry['processes'] is not None:
             if self.entry['processes']:
-                reps += ':'
-                    
-                for p in self.entry['processes']:
+                reps += ' '
+
+                for idx, p in enumerate(self.entry['processes']):
+                    if idx > 0:
+                        reps += ' '
                     reps += process_repr(p)
+        else:
+            reps += ' ({})'.format(NOT_SUPPORTED)
 
         fp.write(reps)
         return fp
@@ -393,6 +402,8 @@ class GPUStatCollection(object):
 
             index = N.nvmlDeviceGetIndex(handle)
             username, opid, locktype = get_lock_features(index)
+            if processes is not None and locktype != 'free' and username:
+                processes = [p for p in processes if p.get('username') == username]
             gpu_info = {
                 'index': index,
                 'uuid': uuid,

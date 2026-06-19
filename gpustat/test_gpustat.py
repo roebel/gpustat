@@ -144,15 +144,27 @@ def _configure_mock(N, Process,
 
 
 MOCK_EXPECTED_OUTPUT_DEFAULT = """\
-[0] GeForce GTX TITAN 0 | 80'C,  76 % |  8000 / 12287 MB | user1(4000M) user2(4000M)
-[1] GeForce GTX TITAN 1 | 36'C,   0 % |  9000 / 12189 MB | user1(3000M) user3(6000M)
-[2] GeForce GTX TITAN 2 | 71'C,  ?? % |     0 / 12189 MB | (Not Supported)
+[0] GeForce GTX TITAN 0 | 80'C,  76 % |  8000 / 12287 MB |   free    | user1(4000M) user2(4000M)
+[1] GeForce GTX TITAN 1 | 36'C,   0 % |  9000 / 12189 MB |   free    | user1(3000M) user3(6000M)
+[2] GeForce GTX TITAN 2 | 71'C,  ?? % |     0 / 12189 MB |   free    | (Not Supported)
 """
 
 MOCK_EXPECTED_OUTPUT_FULL = """\
-[0] GeForce GTX TITAN 0 | 80'C,  76 %,  125 / 250 W |  8000 / 12287 MB | user1:python/48448(4000M) user2:python/153223(4000M)
-[1] GeForce GTX TITAN 1 | 36'C,   0 %,   ?? / 250 W |  9000 / 12189 MB | user1:torch/192453(3000M) user3:caffe/194826(6000M)
-[2] GeForce GTX TITAN 2 | 71'C,  ?? %,  250 /  ?? W |     0 / 12189 MB | (Not Supported)
+[0] GeForce GTX TITAN 0 | 80'C,  76 %,  125 / 250 W |  8000 / 12287 MB |   free    | user1:python/48448(4000M) user2:python/153223(4000M)
+[1] GeForce GTX TITAN 1 | 36'C,   0 %,   ?? / 250 W |  9000 / 12189 MB |   free    | user1:torch/192453(3000M) user3:caffe/194826(6000M)
+[2] GeForce GTX TITAN 2 | 71'C,  ?? %,  250 /  ?? W |     0 / 12189 MB |   free    | (Not Supported)
+"""
+
+MOCK_EXPECTED_OUTPUT_LOCKED_DEFAULT = """\
+[0] GeForce GTX TITAN 0 | 80'C,  76 % |  8000 / 12287 MB | perm-lock | roebel:LO/3229388
+[1] GeForce GTX TITAN 1 | 36'C,   0 % |  9000 / 12189 MB | soft-lock | user3:LO/3235926 user3(6000M)
+[2] GeForce GTX TITAN 2 | 71'C,  ?? % |     0 / 12189 MB | soft-lock | user3:LO/3235926 (Not Supported)
+"""
+
+MOCK_EXPECTED_OUTPUT_LOCKED_ALL = """\
+[0] GeForce GTX TITAN 0 | 80'C,  76 %,  125 / 250 W |  8000 / 12287 MB | perm-lock | roebel:LO/3229388
+[1] GeForce GTX TITAN 1 | 36'C,   0 %,   ?? / 250 W |  9000 / 12189 MB | soft-lock | user3:LO/3235926 user3:caffe/194826(6000M)
+[2] GeForce GTX TITAN 2 | 71'C,  ?? %,  250 /  ?? W |     0 / 12189 MB | soft-lock | user3:LO/3235926 (Not Supported)
 """
 
 
@@ -212,6 +224,43 @@ class TestGPUStat(unittest.TestCase):
         gpustats = gpustat.new_query()
         gpustats.print_formatted(fp=sys.stdout)
 
+    @mock.patch('gpustat.core.get_lock_features')
+    @mock.patch('psutil.Process')
+    @mock.patch('gpustat.core.N')
+    def test_new_query_mocked_with_taken_locks(self, N, Process, get_lock_features):
+        """
+        Cover a realistic lock-held scenario: one perm-lock and two soft-lock GPUs.
+        """
+        _configure_mock(N, Process)
+        get_lock_features.side_effect = [
+            ('roebel', 3229388, 'perm-lock'),
+            ('user3', 3235926, 'soft-lock'),
+            ('user3', 3235926, 'soft-lock'),
+        ]
+
+        gpustats = gpustat.new_query()
+        fp = StringIO()
+        gpustats.print_formatted(fp=fp, no_color=False, show_user=True)
+
+        unescaped = remove_ansi_codes(fp.getvalue())
+        unescaped = '\n'.join(unescaped.split('\n')[1:])
+        self.assertEqual(unescaped, MOCK_EXPECTED_OUTPUT_LOCKED_DEFAULT)
+
+    @mock.patch('gpustat.core.get_lock_features')
+    @mock.patch('psutil.Process')
+    @mock.patch('gpustat.core.N')
+    def test_lock_filters_processes_to_single_owner(self, N, Process, get_lock_features):
+        """
+        When a lock is held by one user, only that user's processes are reported.
+        """
+        _configure_mock(N, Process)
+        get_lock_features.return_value = ('user1', 12345, 'perm-lock')
+
+        gpustats = gpustat.new_query()
+        for g in gpustats:
+            if g.entry['processes']:
+                self.assertTrue(all(p['username'] == 'user1' for p in g.entry['processes']))
+
     @mock.patch('psutil.Process')
     @mock.patch('gpustat.core.N')
     def test_attributes_and_items(self, N, Process):
@@ -266,6 +315,65 @@ class TestGPUStat(unittest.TestCase):
 
         s = capture_output('gpustat', '--no-header')
         self.assertIn("[0]", s.split('\n')[0])
+
+    @unittest.skipIf(sys.version_info < (3, 4), "Only in Python 3.4+")
+    @mock.patch('gpustat.core.get_lock_features')
+    @mock.patch('psutil.Process')
+    @mock.patch('gpustat.core.N')
+    def test_args_all_with_taken_locks(self, N, Process, get_lock_features):
+        """
+        End-to-end CLI coverage for -a with lock-held GPUs.
+        """
+        _configure_mock(N, Process)
+        get_lock_features.side_effect = [
+            ('roebel', 3229388, 'perm-lock'),
+            ('user3', 3235926, 'soft-lock'),
+            ('user3', 3235926, 'soft-lock'),
+        ]
+
+        def capture_output(*args):
+            f = StringIO()
+            import contextlib
+
+            with contextlib.redirect_stdout(f):
+                try:
+                    gpustat.main(*args)
+                except SystemExit:
+                    raise AssertionError("Argparse failed (see above error message)")
+            return f.getvalue()
+
+        s = capture_output('gpustat', '-a')
+        unescaped = remove_ansi_codes(s)
+        unescaped = '\n'.join(unescaped.split('\n')[1:])
+        self.assertEqual(unescaped, MOCK_EXPECTED_OUTPUT_LOCKED_ALL)
+
+
+class TestLockFeatures(unittest.TestCase):
+
+    @mock.patch('gpustat.core.os.path.realpath')
+    @mock.patch('gpustat.core.os.path.islink')
+    @mock.patch('gpustat.core.os.path.exists')
+    def test_perm_lock_is_reported(self, exists, islink, realpath):
+        exists.return_value = True
+        islink.return_value = True
+        realpath.return_value = '/tmp/GPULOCK:9123_roebel_perm'
+
+        user, owner_pid, lock = gpustat.core.get_lock_features(0)
+
+        self.assertEqual(user, 'roebel')
+        self.assertEqual(owner_pid, 9123)
+        self.assertEqual(lock, 'perm-lock')
+
+    @mock.patch('gpustat.core.os.path.realpath')
+    @mock.patch('gpustat.core.os.path.islink')
+    @mock.patch('gpustat.core.os.path.exists')
+    def test_lock_kind_is_normalized_to_lowercase(self, exists, islink, realpath):
+        exists.return_value = True
+        islink.return_value = True
+        realpath.return_value = '/tmp/GPULOCK:42_alice_PERM'
+
+        _, _, lock = gpustat.core.get_lock_features(0)
+        self.assertEqual(lock, 'perm-lock')
 
 
 if __name__ == '__main__':
